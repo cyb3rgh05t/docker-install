@@ -1,0 +1,41 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- NFS-Manager BEGIN ---
+/mnt/raidpool/filesystem 144.76.87.20(rw,async,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
+/mnt/raidpool/filesystem 193.108.118.53(rw,async,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
+# --- NFS-Manager END ---
