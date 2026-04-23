@@ -1,0 +1,46 @@
+---
+- hosts: localhost
+  gather_facts: false
+  vars:
+    motd_files: "{{ lookup('fileglob', playbook_dir + '/[0-9][0-9]-*', wantlist=True) | map('basename') | list | sort }}"
+  tasks:
+    - name: Disable existing MOTD
+      shell: chmod -x /etc/update-motd.d/*
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Deploy Dynamic MOTD
+      file:
+        path: /etc/update-motd.d
+        state: directory
+        mode: "0755"
+
+    - name: Import MOTD Files
+      copy:
+        src: "{{ item }}"
+        dest: "/etc/update-motd.d/{{ item }}"
+        force: true
+        mode: "0755"
+      loop: "{{ motd_files }}"
+      when: motd_files | length > 0
+
+    - name: Warn when no MOTD scripts are available
+      debug:
+        msg: "No MOTD scripts found in {{ playbook_dir }}"
+      when: motd_files | length == 0
+
+    - name: Install lolcat package (if available)
+      package:
+        name: lolcat
+        state: present
+      ignore_errors: yes
+
+    - name: Remove legacy MOTD cron job
+      cron:
+        name: "Update MOTD"
+        user: "root"
+        minute: "10"
+        job: "update-motd"
+        state: absent
+      become_user: root

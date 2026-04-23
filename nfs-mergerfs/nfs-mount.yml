@@ -9,15 +9,15 @@ services:
       - "PGID=1000"
       - "TZ=Europe/Berlin"
       - "JWT_SECRET=1qeH74P6EhfcsEu/Fbb02/hTQKMIoa1ISzkzjWgx3CXYg7APM7BE/DYXzM/CHBru"
-      - "DEFAULT_ADMIN_USER=cyb3rgh05t"
-      - "DEFAULT_ADMIN_PASS=cyb3r9ffe4e761F!"
+      - "DEFAULT_ADMIN_USER=admin"
+      - "DEFAULT_ADMIN_PASS=admin123"
       - "API_KEY="
       - "DISCORD_WEBHOOK="
       - "TELEGRAM_BOT_TOKEN="
       - "TELEGRAM_CHAT_ID="
       - "TELEGRAM_TOPIC_ID="
       - "SERVER_NAME="
-      - "NFS_THREADS=512"
+      - "NFS_THREADS="
     restart: "unless-stopped"
     privileged: true
     cap_add:
@@ -32,3 +32,4 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - "/opt/appdata/nfs-mount/ssh:/config/ssh"
       - "/etc/hostname:/etc/hostname_host:ro"
+      - "/etc/exports:/etc/exports"
