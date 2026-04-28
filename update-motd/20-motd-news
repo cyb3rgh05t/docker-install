@@ -54,7 +54,7 @@ safe_print() {
 if [ "$FORCED" != "1" ]; then
   	if [ -r $CACHE ]; then
 		echo
-		safe_print $CACHE
+		safe_print "$CACHE" | grep -v -i -E "kubernetes|microk8s|secure-kubernetes|ubuntu.com/engage/secure"
 	else
 		: > $CACHE
 	fi

@@ -2,6 +2,6 @@
 
 stamp="/var/lib/update-notifier/updates-available"
 
-[ ! -r "$stamp" ] || cat "$stamp"
+[ ! -r "$stamp" ] || grep -v -E "Expanded Security Maintenance for Applications is not enabled\.|Enable ESM Apps to receive additional future security updates\.|See https://ubuntu.com/esm or run: sudo pro status" "$stamp"
 
 find $stamp -newermt 'now-7 days' 2> /dev/null | grep -q -m 1 '.' || /usr/share/update-notifier/notify-updates-outdated

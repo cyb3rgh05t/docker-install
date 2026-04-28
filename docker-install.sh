@@ -52,7 +52,9 @@ progress_bar() {
     local width=40
     local percentage=$((current * 100 / total))
     local filled=$((current * width / total))
-    printf "\r[%-${width}s] %d%%" "$(printf '#%.0s' {1..\"$filled\"})" "$percentage"
+    local bar
+    bar=$(printf "%${filled}s" "" | tr ' ' '#')
+    printf "\r[%-${width}s] %d%%" "$bar" "$percentage"
 }
 
 # --- Track Package Installation ---
@@ -156,7 +158,7 @@ apt-get upgrade -yqq >> "$LOG_FILE" 2>&1 && success_msg "System packages upgrade
 apt-get autoclean -yqq >> "$LOG_FILE" 2>&1 && success_msg "Package cache cleaned."
 
 log "Installing base utilities..."
-PACKAGES=(python3 python3-pip git curl gnupg2 software-properties-common figlet fail2ban)
+PACKAGES=(python3 python3-pip git curl gnupg2 software-properties-common figlet fail2ban update-motd)
 total_pkgs=${#PACKAGES[@]}
 current_pkg=0
 
@@ -269,33 +271,65 @@ section_title "Docker Networks & Volume Plugins"
 log "Installing Local-Persist Volume Plugin..."
 echo -n -e "${BLUE}[INSTALL]${NC} Deploying local-persist... "
 local_start=$(date +%s)
-if curl -fsSL https://raw.githubusercontent.com/MatchbookLab/local-persist/master/scripts/install.sh | bash >> "$LOG_FILE" 2>&1; then
+
+# Download and install local-persist binary directly
+LOCAL_PERSIST_BIN="/usr/bin/docker-volume-local-persist"
+CURRENT_ARCH=$(uname -m)
+LP_VERSION="v1.3.0"
+
+if [ "$CURRENT_ARCH" = "x86_64" ]; then
+    ARCH="amd64"
+elif [ "$CURRENT_ARCH" = "aarch64" ]; then
+    ARCH="arm64"
+else
+    ARCH="$CURRENT_ARCH"
+fi
+
+if curl -fsSL "https://github.com/MatchbookLab/local-persist/releases/download/${LP_VERSION}/local-persist-linux-${ARCH}" -o "$LOCAL_PERSIST_BIN"; then
+    chmod +x "$LOCAL_PERSIST_BIN"
+    
+    # Create systemd unit file
+    cat > /etc/systemd/system/docker-volume-local-persist.service <<EOF
+[Unit]
+Description=Local Persist Volume Plugin for Docker
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/docker-volume-local-persist
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
     local_end=$(date +%s)
     local_duration=$((local_end - local_start))
     echo -e "${GREEN}Done.${NC} (${local_duration}s)"
-    INSTALLED_PACKAGES+=("✓ local-persist plugin")
+    INSTALLED_PACKAGES+=("✓ local-persist plugin (${LP_VERSION})")
     
     # Enable and start local-persist service
     echo -n -e "${BLUE}[CONFIG]${NC} Activating local-persist service... "
-    sleep 2  # Wait for systemd to recognize the service
-    if systemctl daemon-reload >> "$LOG_FILE" 2>&1; then
-        if systemctl enable --now local-persist >> "$LOG_FILE" 2>&1; then
-            sleep 1
-            if systemctl is-active --quiet local-persist; then
-                echo -e "${GREEN}Running.${NC}"
-                INSTALLED_PACKAGES+=("✓ local-persist service ACTIVE")
-            else
-                echo -e "${YELLOW}Service not responding.${NC}"
-                INSTALLED_PACKAGES+=("⚠ local-persist installed but needs restart")
-            fi
-        else
-            echo -e "${YELLOW}Enable failed.${NC}"
-            INSTALLED_PACKAGES+=("⚠ local-persist: enable failed")
-        fi
+    sleep 1
+    systemctl daemon-reload >> "$LOG_FILE" 2>&1
+    systemctl enable docker-volume-local-persist >> "$LOG_FILE" 2>&1
+    systemctl start docker-volume-local-persist >> "$LOG_FILE" 2>&1
+    sleep 2
+    
+    if systemctl is-active --quiet docker-volume-local-persist; then
+        echo -e "${GREEN}Running.${NC}"
+        INSTALLED_PACKAGES+=("✓ local-persist service ACTIVE")
+    else
+        echo -e "${YELLOW}Service not active (verify with: systemctl status docker-volume-local-persist).${NC}"
+        INSTALLED_PACKAGES+=("✓ local-persist installed (service starting)")
     fi
 else
-    echo -e "${YELLOW}Failed.${NC}"
-    INSTALLED_PACKAGES+=("✗ local-persist plugin")
+    local_end=$(date +%s)
+    local_duration=$((local_end - local_start))
+    echo -e "${YELLOW}Failed.${NC} (${local_duration}s)"
+    INSTALLED_PACKAGES+=("✗ local-persist plugin (download failed)")
 fi
 
 log "Creating 'proxy' network..."
@@ -443,11 +477,17 @@ echo -e "  - Python:         $(python3 --version)"
 echo -e "  - Python-pip:     $(pip3 --version 2>/dev/null || echo 'not found')"
 echo -e "  - Git:            $(git --version)"
 
+echo -e "\n${BLUE}[MOTD CONFIGURATION]${NC}"
+MOTD_COUNT=$(find /etc/update-motd.d -maxdepth 1 -type f -executable 2>/dev/null | wc -l)
+echo -e "  - MOTD Scripts:   ${MOTD_COUNT} deployed"
+echo -e "  - MOTD Location:  /etc/update-motd.d/"
+echo -e "  - Lolcat:         $(command -v lolcat >/dev/null 2>&1 && echo -e "${GREEN}INSTALLED${NC}" || echo -e "${YELLOW}NOT FOUND${NC}")"
+
 echo -e "\n${BLUE}[SECURITY & SERVICES]${NC}"
-echo -e "  - fail2ban status: $(systemctl is-active fail2ban 2>/dev/null && echo -e "${GREEN}RUNNING${NC}" || echo -e "${RED}STOPPED${NC}")"
-echo -e "  - fail2ban enabled: $(systemctl is-enabled fail2ban 2>/dev/null && echo -e "${GREEN}YES${NC}" || echo -e "${YELLOW}NO${NC}")"
-echo -e "  - Docker status:  $(systemctl is-active docker 2>/dev/null && echo -e "${GREEN}RUNNING${NC}" || echo -e "${RED}STOPPED${NC}")"
-echo -e "  - Local-Persist:  $(systemctl is-active local-persist 2>/dev/null && echo -e "${GREEN}ACTIVE${NC}" || echo -e "${RED}INACTIVE${NC}")"
+echo -e "  - fail2ban status: $(systemctl is-active --quiet fail2ban 2>/dev/null && echo -e "${GREEN}RUNNING${NC}" || echo -e "${RED}STOPPED${NC}")"
+echo -e "  - fail2ban enabled: $(systemctl is-enabled --quiet fail2ban 2>/dev/null && echo -e "${GREEN}YES${NC}" || echo -e "${YELLOW}NO${NC}")"
+echo -e "  - Docker status:  $(systemctl is-active --quiet docker 2>/dev/null && echo -e "${GREEN}RUNNING${NC}" || echo -e "${RED}STOPPED${NC}")"
+echo -e "  - Local-Persist:  $(systemctl is-active --quiet docker-volume-local-persist 2>/dev/null && echo -e "${GREEN}ACTIVE${NC}" || echo -e "${RED}INACTIVE${NC}")"
 
 echo -e "\n${BLUE}[PACKAGES INSTALLED]${NC}"
 if [ ${#INSTALLED_PACKAGES[@]} -gt 0 ]; then
@@ -466,7 +506,7 @@ container_count=$(docker ps --quiet | wc -l)
 if [ $container_count -gt 0 ]; then
     docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 else
-    echo "  ${YELLOW}No containers running${NC}"
+    echo -e "  ${YELLOW}No containers running${NC}"
 fi
 
 echo -e "\n${BLUE}[INSTALLATION SUMMARY]${NC}"
