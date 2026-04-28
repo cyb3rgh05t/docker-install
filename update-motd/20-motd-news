@@ -112,9 +112,10 @@ for u in $URLS; do
 	if curl --connect-timeout "$WAIT" --max-time "$WAIT" -A "$USER_AGENT" -o- "$u" >"$NEWS" 2>"$ERR"; then
 		echo
 		# At most, 10 lines of text, remove control characters, print at most 80 characters per line
-		safe_print "$NEWS"
+		# Filter out promotional lines (e.g., Kubernetes, MicroK8s)
+		safe_print "$NEWS" | grep -v -i -E "kubernetes|microk8s|secure-kubernetes|ubuntu.com/engage/secure"
 		# Try to update the cache
-		safe_print "$NEWS" 2>/dev/null >$CACHE || true
+		safe_print "$NEWS" 2>/dev/null | grep -v -i -E "kubernetes|microk8s|secure-kubernetes|ubuntu.com/engage/secure" >$CACHE || true
 	else
 		: > "$CACHE"
  	fi

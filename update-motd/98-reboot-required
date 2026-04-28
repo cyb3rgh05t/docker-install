@@ -1,5 +1,12 @@
 #!/bin/sh
 
-if [ -x /usr/lib/update-notifier/update-motd-reboot-required ]; then
-    exec /usr/lib/update-notifier/update-motd-reboot-required
+# Check if reboot is actually required
+if [ -f /var/run/reboot-required ]; then
+    # Show the reboot notification
+    if [ -x /usr/lib/update-notifier/update-motd-reboot-required ]; then
+        /usr/lib/update-notifier/update-motd-reboot-required
+    fi
+else
+    # System has been rebooted - clean up old reboot-required files
+    rm -f /var/run/reboot-required*
 fi

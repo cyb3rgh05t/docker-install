@@ -41,6 +41,41 @@ warn_msg() {
     echo -e "${YELLOW}[WARN]${NC} $1" | tee -a "$LOG_FILE"
 }
 
+# --- Tracking Variables ---
+declare -a INSTALLED_PACKAGES=()
+INSTALL_START_TIME=$(date +%s)
+
+# --- Progress Bar Function ---
+progress_bar() {
+    local current=$1
+    local total=$2
+    local width=40
+    local percentage=$((current * 100 / total))
+    local filled=$((current * width / total))
+    printf "\r[%-${width}s] %d%%" "$(printf '#%.0s' {1..\"$filled\"})" "$percentage"
+}
+
+# --- Track Package Installation ---
+install_package_tracked() {
+    local pkg=$1
+    if dpkg -l | grep -q "^ii  $pkg "; then
+        echo -e "${YELLOW}[SKIP]${NC} $pkg is already installed."
+        INSTALLED_PACKAGES+=("$pkg (pre-installed)")
+    else
+        echo -n -e "${BLUE}[INSTALL]${NC} Installing $pkg... "
+        local start_time=$(date +%s)
+        if apt-get install -yqq "$pkg" >> "$LOG_FILE" 2>&1; then
+            local end_time=$(date +%s)
+            local duration=$((end_time - start_time))
+            echo -e "${GREEN}Done.${NC} (${duration}s)"
+            INSTALLED_PACKAGES+=("✓ $pkg")
+        else
+            echo -e "${YELLOW}Skipped.${NC}"
+            INSTALLED_PACKAGES+=("✗ $pkg (unavailable)")
+        fi
+    fi
+}
+
 check_internet() {
     echo -n -e "${BLUE}[CHECK]${NC} Checking internet connectivity... "
     if curl -fsSL --connect-timeout 8 https://google.com -o /dev/null 2>/dev/null; then
@@ -100,6 +135,20 @@ fi
 
 # --- 3. System Preparation ---
 check_internet
+
+# Set Timezone
+section_title "System Configuration"
+CURRENT_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "")
+if [ "$CURRENT_TZ" != "Europe/Berlin" ]; then
+    log "Setting timezone to Europe/Berlin..."
+    timedatectl set-timezone Europe/Berlin >> "$LOG_FILE" 2>&1
+    success_msg "Timezone set to Europe/Berlin"
+    INSTALLED_PACKAGES+=("✓ Timezone: Europe/Berlin")
+else
+    echo -e "${YELLOW}[SKIP]${NC} Timezone already set to Europe/Berlin"
+    INSTALLED_PACKAGES+=("Timezone: Europe/Berlin (already set)")
+fi
+
 section_title "System Preparation & Updates"
 log "Updating package lists and upgrading system..."
 apt-get update -yqq >> "$LOG_FILE" 2>&1 && success_msg "Package lists updated."
@@ -107,38 +156,39 @@ apt-get upgrade -yqq >> "$LOG_FILE" 2>&1 && success_msg "System packages upgrade
 apt-get autoclean -yqq >> "$LOG_FILE" 2>&1 && success_msg "Package cache cleaned."
 
 log "Installing base utilities..."
-PACKAGES=(python3 python3-pip git curl gnupg2 software-properties-common figlet)
+PACKAGES=(python3 python3-pip git curl gnupg2 software-properties-common figlet fail2ban)
+total_pkgs=${#PACKAGES[@]}
+current_pkg=0
 
 for pkg in "${PACKAGES[@]}"; do
-    if dpkg -l | grep -q "^ii  $pkg "; then
-        echo -e "${YELLOW}[SKIP]${NC} $pkg is already installed."
-    else
-        echo -n -e "${BLUE}[INSTALL]${NC} Installing $pkg... "
-        if apt-get install -yqq "$pkg" >> "$LOG_FILE" 2>&1; then
-            echo -e "${GREEN}Done.${NC}"
-        else
-            echo -e "${YELLOW}Skipped (package unavailable).${NC}"
-        fi
-    fi
+    progress_bar $current_pkg $total_pkgs
+    install_package_tracked "$pkg"
+    ((current_pkg++))
 done
+echo "" # New line after progress
+
+# --- fail2ban Configuration ---
+section_title "fail2ban Security Configuration"
+log "Enabling and starting fail2ban service..."
+if systemctl list-unit-files | grep -q "^fail2ban\.service"; then
+    systemctl enable --now fail2ban >> "$LOG_FILE" 2>&1 && success_msg "fail2ban enabled and started." || warn_msg "fail2ban could not be started."
+else
+    warn_msg "fail2ban service not available on this system."
+fi
 
 if [[ "$main_choice" == "4" ]]; then
     section_title "NFS-MergerFS Host Dependencies"
     log "Installing host packages for NFS-MergerFS mode..."
     HOST_NFS_PACKAGES=(nfs-kernel-server nfs-common mergerfs rclone fuse3 rpcbind)
+    total_nfs=${#HOST_NFS_PACKAGES[@]}
+    current_nfs=0
 
     for pkg in "${HOST_NFS_PACKAGES[@]}"; do
-        if dpkg -l | grep -q "^ii  $pkg "; then
-            echo -e "${YELLOW}[SKIP]${NC} $pkg is already installed."
-        else
-            echo -n -e "${BLUE}[INSTALL]${NC} Installing $pkg... "
-            if apt-get install -yqq "$pkg" >> "$LOG_FILE" 2>&1; then
-                echo -e "${GREEN}Done.${NC}"
-            else
-                echo -e "${YELLOW}Skipped (package unavailable).${NC}"
-            fi
-        fi
+        progress_bar $current_nfs $total_nfs
+        install_package_tracked "$pkg"
+        ((current_nfs++))
     done
+    echo ""
 
     # --- NFS/FUSE Service Activation ---
     echo -e "\n${YELLOW}[QUESTION]${NC} Sollen die NFS & FUSE Host-Services jetzt aktiviert und gestartet werden?"
@@ -217,7 +267,36 @@ fi
 # --- 5. Networks & Plugins ---
 section_title "Docker Networks & Volume Plugins"
 log "Installing Local-Persist Volume Plugin..."
-curl -fsSL https://raw.githubusercontent.com/MatchbookLab/local-persist/master/scripts/install.sh | bash >> "$LOG_FILE" 2>&1
+echo -n -e "${BLUE}[INSTALL]${NC} Deploying local-persist... "
+local_start=$(date +%s)
+if curl -fsSL https://raw.githubusercontent.com/MatchbookLab/local-persist/master/scripts/install.sh | bash >> "$LOG_FILE" 2>&1; then
+    local_end=$(date +%s)
+    local_duration=$((local_end - local_start))
+    echo -e "${GREEN}Done.${NC} (${local_duration}s)"
+    INSTALLED_PACKAGES+=("✓ local-persist plugin")
+    
+    # Enable and start local-persist service
+    echo -n -e "${BLUE}[CONFIG]${NC} Activating local-persist service... "
+    sleep 2  # Wait for systemd to recognize the service
+    if systemctl daemon-reload >> "$LOG_FILE" 2>&1; then
+        if systemctl enable --now local-persist >> "$LOG_FILE" 2>&1; then
+            sleep 1
+            if systemctl is-active --quiet local-persist; then
+                echo -e "${GREEN}Running.${NC}"
+                INSTALLED_PACKAGES+=("✓ local-persist service ACTIVE")
+            else
+                echo -e "${YELLOW}Service not responding.${NC}"
+                INSTALLED_PACKAGES+=("⚠ local-persist installed but needs restart")
+            fi
+        else
+            echo -e "${YELLOW}Enable failed.${NC}"
+            INSTALLED_PACKAGES+=("⚠ local-persist: enable failed")
+        fi
+    fi
+else
+    echo -e "${YELLOW}Failed.${NC}"
+    INSTALLED_PACKAGES+=("✗ local-persist plugin")
+fi
 
 log "Creating 'proxy' network..."
 if [ -z "$(docker network ls --filter name=^proxy$ --format="{{.Name}}")" ]; then
@@ -346,6 +425,12 @@ if [[ "$main_choice" == "4" ]]; then
     [[ "$container_selection" =~ "d" ]] && deploy_compose "dockhand.yml" "Dockhand"
 fi
 
+# --- Calculate installation time ---
+INSTALL_END_TIME=$(date +%s)
+INSTALL_TOTAL=$((INSTALL_END_TIME - INSTALL_START_TIME))
+INSTALL_MINS=$((INSTALL_TOTAL / 60))
+INSTALL_SECS=$((INSTALL_TOTAL % 60))
+
 # --- 9. Final Status Report ---
 section_title "Installation Final Report"
 [ "$SUDO_USER" ] && usermod -aG docker "$SUDO_USER"
@@ -355,19 +440,39 @@ echo -e "\n${BLUE}[SYSTEM VERSIONS]${NC}"
 echo -e "  - Docker:         $(docker --version)"
 echo -e "  - Compose:        $(docker compose version 2>/dev/null || docker-compose version --short 2>/dev/null || echo 'n/a')"
 echo -e "  - Python:         $(python3 --version)"
+echo -e "  - Python-pip:     $(pip3 --version 2>/dev/null || echo 'not found')"
+echo -e "  - Git:            $(git --version)"
+
+echo -e "\n${BLUE}[SECURITY & SERVICES]${NC}"
+echo -e "  - fail2ban status: $(systemctl is-active fail2ban 2>/dev/null && echo -e "${GREEN}RUNNING${NC}" || echo -e "${RED}STOPPED${NC}")"
+echo -e "  - fail2ban enabled: $(systemctl is-enabled fail2ban 2>/dev/null && echo -e "${GREEN}YES${NC}" || echo -e "${YELLOW}NO${NC}")"
+echo -e "  - Docker status:  $(systemctl is-active docker 2>/dev/null && echo -e "${GREEN}RUNNING${NC}" || echo -e "${RED}STOPPED${NC}")"
+echo -e "  - Local-Persist:  $(systemctl is-active local-persist 2>/dev/null && echo -e "${GREEN}ACTIVE${NC}" || echo -e "${RED}INACTIVE${NC}")"
+
+echo -e "\n${BLUE}[PACKAGES INSTALLED]${NC}"
+if [ ${#INSTALLED_PACKAGES[@]} -gt 0 ]; then
+    for pkg_info in "${INSTALLED_PACKAGES[@]}"; do
+        echo -e "  $pkg_info"
+    done
+else
+    echo "  ${YELLOW}(No new packages installed)${NC}"
+fi
 
 echo -e "\n${BLUE}[NETWORK STATUS]${NC}"
 docker network ls --filter "name=proxy" --format "  Network: {{.Name}} ({{.Driver}})"
 
 echo -e "\n${BLUE}[CONTAINER STATUS]${NC}"
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-
-echo -e "\n${BLUE}[PERSISTENCE STATUS]${NC}"
-if systemctl is-active --quiet local-persist; then
-    echo -e "  Local-Persist:  ${GREEN}ACTIVE${NC}"
+container_count=$(docker ps --quiet | wc -l)
+if [ $container_count -gt 0 ]; then
+    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 else
-    echo -e "  Local-Persist:  ${RED}FAILED/INACTIVE${NC}"
+    echo "  ${YELLOW}No containers running${NC}"
 fi
+
+echo -e "\n${BLUE}[INSTALLATION SUMMARY]${NC}"
+echo -e "  - Total packages: ${#INSTALLED_PACKAGES[@]}"
+echo -e "  - Total time:     ${INSTALL_MINS}m ${INSTALL_SECS}s"
+echo -e "  - Log file:       $LOG_FILE"
 
 echo -e "\n${CYAN}====================================================${NC}"
 echo -e "${GREEN}SUCCESS! Your system is ready to use.${NC}"
