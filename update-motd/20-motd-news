@@ -40,6 +40,7 @@
 [ -n "$WAIT" ] || WAIT=5
 [ -n "$CACHE" ] || CACHE="/var/cache/motd-news"
 [ "$1" = "--force" ] && FORCED=1
+FILTER_REGEX="kubernetes|microk8s|k8s|secure-kubernetes|ubuntu.com/engage/secure|edge and iot secure|cluster deployment"
 
 # Ensure we print safely, maximum of the first 10 lines,
 # maximum of the first 80 chars per line, no control chars
@@ -54,7 +55,7 @@ safe_print() {
 if [ "$FORCED" != "1" ]; then
   	if [ -r $CACHE ]; then
 		echo
-		safe_print "$CACHE" | grep -v -i -E "kubernetes|microk8s|secure-kubernetes|ubuntu.com/engage/secure"
+		safe_print "$CACHE" | grep -v -i -E "$FILTER_REGEX"
 	else
 		: > $CACHE
 	fi
@@ -113,9 +114,9 @@ for u in $URLS; do
 		echo
 		# At most, 10 lines of text, remove control characters, print at most 80 characters per line
 		# Filter out promotional lines (e.g., Kubernetes, MicroK8s)
-		safe_print "$NEWS" | grep -v -i -E "kubernetes|microk8s|secure-kubernetes|ubuntu.com/engage/secure"
+		safe_print "$NEWS" | grep -v -i -E "$FILTER_REGEX"
 		# Try to update the cache
-		safe_print "$NEWS" 2>/dev/null | grep -v -i -E "kubernetes|microk8s|secure-kubernetes|ubuntu.com/engage/secure" >$CACHE || true
+		safe_print "$NEWS" 2>/dev/null | grep -v -i -E "$FILTER_REGEX" >$CACHE || true
 	else
 		: > "$CACHE"
  	fi

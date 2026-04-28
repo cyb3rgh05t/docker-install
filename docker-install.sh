@@ -276,6 +276,7 @@ local_start=$(date +%s)
 LOCAL_PERSIST_BIN="/usr/bin/docker-volume-local-persist"
 CURRENT_ARCH=$(uname -m)
 LP_VERSION="v1.3.0"
+LP_SERVICE="docker-volume-local-persist"
 
 if [ "$CURRENT_ARCH" = "x86_64" ]; then
     ARCH="amd64"
@@ -285,11 +286,27 @@ else
     ARCH="$CURRENT_ARCH"
 fi
 
-if curl -fsSL "https://github.com/MatchbookLab/local-persist/releases/download/${LP_VERSION}/local-persist-linux-${ARCH}" -o "$LOCAL_PERSIST_BIN"; then
-    chmod +x "$LOCAL_PERSIST_BIN"
-    
-    # Create systemd unit file
-    cat > /etc/systemd/system/docker-volume-local-persist.service <<EOF
+if command -v docker-volume-local-persist >/dev/null 2>&1; then
+    echo -e "${GREEN}Already installed.${NC}"
+    INSTALLED_PACKAGES+=("local-persist plugin (pre-installed)")
+else
+    if curl -fsSL "https://github.com/MatchbookLab/local-persist/releases/download/${LP_VERSION}/local-persist-linux-${ARCH}" -o "$LOCAL_PERSIST_BIN"; then
+        chmod +x "$LOCAL_PERSIST_BIN"
+        INSTALLED_PACKAGES+=("✓ local-persist plugin (${LP_VERSION})")
+    else
+        # Fallback: run upstream installer as a real file (BASH_SOURCE required by script)
+        INSTALLER_TMP="/tmp/local-persist-install.sh"
+        if curl -fsSL "https://raw.githubusercontent.com/MatchbookLab/local-persist/master/scripts/install.sh" -o "$INSTALLER_TMP" && bash "$INSTALLER_TMP" >> "$LOG_FILE" 2>&1; then
+            INSTALLED_PACKAGES+=("✓ local-persist plugin (installer fallback)")
+        else
+            INSTALLED_PACKAGES+=("✗ local-persist plugin (download failed)")
+        fi
+        rm -f "$INSTALLER_TMP"
+    fi
+fi
+
+# Create/overwrite systemd unit file to ensure consistent service name and startup
+cat > /etc/systemd/system/docker-volume-local-persist.service <<EOF
 [Unit]
 Description=Local Persist Volume Plugin for Docker
 After=docker.service
@@ -304,32 +321,21 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-    
-    local_end=$(date +%s)
-    local_duration=$((local_end - local_start))
-    echo -e "${GREEN}Done.${NC} (${local_duration}s)"
-    INSTALLED_PACKAGES+=("✓ local-persist plugin (${LP_VERSION})")
-    
-    # Enable and start local-persist service
-    echo -n -e "${BLUE}[CONFIG]${NC} Activating local-persist service... "
-    sleep 1
-    systemctl daemon-reload >> "$LOG_FILE" 2>&1
-    systemctl enable docker-volume-local-persist >> "$LOG_FILE" 2>&1
-    systemctl start docker-volume-local-persist >> "$LOG_FILE" 2>&1
-    sleep 2
-    
-    if systemctl is-active --quiet docker-volume-local-persist; then
-        echo -e "${GREEN}Running.${NC}"
-        INSTALLED_PACKAGES+=("✓ local-persist service ACTIVE")
-    else
-        echo -e "${YELLOW}Service not active (verify with: systemctl status docker-volume-local-persist).${NC}"
-        INSTALLED_PACKAGES+=("✓ local-persist installed (service starting)")
-    fi
+
+# Enable and start local-persist service
+echo -n -e "${BLUE}[CONFIG]${NC} Activating local-persist service... "
+systemctl daemon-reload >> "$LOG_FILE" 2>&1
+systemctl enable "$LP_SERVICE" >> "$LOG_FILE" 2>&1
+systemctl restart "$LP_SERVICE" >> "$LOG_FILE" 2>&1
+
+local_end=$(date +%s)
+local_duration=$((local_end - local_start))
+if systemctl is-active --quiet "$LP_SERVICE"; then
+    echo -e "${GREEN}Running.${NC} (${local_duration}s)"
+    INSTALLED_PACKAGES+=("✓ local-persist service ACTIVE")
 else
-    local_end=$(date +%s)
-    local_duration=$((local_end - local_start))
-    echo -e "${YELLOW}Failed.${NC} (${local_duration}s)"
-    INSTALLED_PACKAGES+=("✗ local-persist plugin (download failed)")
+    echo -e "${YELLOW}Not active.${NC} (${local_duration}s)"
+    warn_msg "local-persist service is not active. Check: systemctl status ${LP_SERVICE}"
 fi
 
 log "Creating 'proxy' network..."
