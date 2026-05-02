@@ -155,9 +155,23 @@ fi
 
 section_title "System Preparation & Updates"
 log "Updating package lists and upgrading system..."
-apt-get update -yqq >> "$LOG_FILE" 2>&1 && success_msg "Package lists updated."
-apt-get upgrade -yqq >> "$LOG_FILE" 2>&1 && success_msg "System packages upgraded."
-apt-get autoclean -yqq >> "$LOG_FILE" 2>&1 && success_msg "Package cache cleaned."
+if apt-get update -yqq >> "$LOG_FILE" 2>&1; then
+    success_msg "Package lists updated."
+else
+    error_exit "apt update failed. Check network/mirrors and retry."
+fi
+
+if apt-get -o APT::Get::Always-Include-Phased-Updates=true full-upgrade -yqq >> "$LOG_FILE" 2>&1; then
+    success_msg "System packages fully upgraded."
+else
+    error_exit "apt full-upgrade failed. Resolve apt/dpkg issues and retry."
+fi
+
+if apt-get autoclean -yqq >> "$LOG_FILE" 2>&1; then
+    success_msg "Package cache cleaned."
+else
+    warn_msg "Package cache cleanup failed (non-critical)."
+fi
 
 log "Installing base utilities..."
 PACKAGES=(python3 python3-pip git curl gnupg2 software-properties-common figlet fail2ban update-motd)
