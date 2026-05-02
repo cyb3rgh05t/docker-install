@@ -14,8 +14,12 @@ PROCESSOR_NAME=$(grep "model name" /proc/cpuinfo | cut -d ' ' -f3- | awk {'print
 PROCESSOR_COUNT=$(grep -ioP 'processor\t:' /proc/cpuinfo | wc -l)
 IP_ADDRESS=$(hostname -I | awk '{print $1}')
 NTCARD=$(ip -o link show | awk -F': ' '{print $2}' | grep -v 'lo' | grep -v 'docker' | grep -v 'br-' | head -n 1)
-DOCKER=$(systemctl is-active docker)
-DOCKER2=$(docker --version | awk '{print $3}')
+DOCKER_INSTALLED=false
+if command -v docker >/dev/null 2>&1; then
+    DOCKER_INSTALLED=true
+    DOCKER=$(systemctl is-active docker)
+    DOCKER2=$(docker --version | awk '{print $3}')
+fi
 UNIONFS=$(systemctl is-active pgunion)
 
 HSTNAME=$(cat /etc/hostname)
@@ -58,6 +62,10 @@ $W  Network-Card...: $G$NTCARD
 $B  Fail2ban
 $W  SSH.fails......: $G$failledssh
 $W  SSH.fails.since: $G$failledsshacc
+"
 
-$B  Service Status
-$W  Docker.........: $W$DOCKER , v$G$DOCKER2$W"
+if $DOCKER_INSTALLED; then
+echo -e "$B  Service Status
+$W  Docker.........: $W$DOCKER , v$G$DOCKER2$W
+"
+fi

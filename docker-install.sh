@@ -101,9 +101,10 @@ echo -e "1) ${GREEN}DOCKSERVER${NC}               (External Script: git.io/J3GDc
 echo -e "2) ${GREEN}Docker Full Setup${NC}         (Complete Docker + Compose System)"
 echo -e "3) ${GREEN}Docker VPN-Proxy System${NC}   (Docker + VPN-Proxy Container Selection)"
 echo -e "4) ${GREEN}Docker NFS-MergerFS System${NC} (Docker + NFS-MergerFS Container Selection)"
-echo -e "5) ${RED}Cancel${NC}"
+echo -e "5) ${CYAN}System Only Setup${NC}         (No Docker — Timezone, Packages, MOTD, fail2ban)"
+echo -e "6) ${RED}Cancel${NC}"
 echo -e "${BLUE}====================================================${NC}"
-read -rp "Selection [1-5]: " main_choice
+read -rp "Selection [1-6]: " main_choice
 
 case $main_choice in
     1)
@@ -114,7 +115,8 @@ case $main_choice in
     2) log "Option 2 selected: Docker Full Setup..." ;;
     3) log "Option 3 selected: Docker VPN-Proxy System..." ;;
     4) log "Option 4 selected: Docker NFS-MergerFS System..." ;;
-    5) echo "Exiting..."; exit 0 ;;
+    5) log "Option 5 selected: System Only (No Docker)..." ;;
+    6) echo "Exiting..."; exit 0 ;;
     *) error_exit "Invalid selection." ;;
 esac
 
@@ -219,6 +221,8 @@ if [[ "$main_choice" == "4" ]]; then
         log "NFS service activation skipped by user."
     fi
 fi
+
+if [[ "$main_choice" != "5" ]]; then
 
 clear
 figlet -f slant "Docker Setup"
@@ -346,6 +350,8 @@ else
     echo -e "${YELLOW}[INFO]${NC} Network 'proxy' already exists."
 fi
 
+fi # end: if not option 5
+
 # --- 6. GitHub Repository Sync ---
 section_title "GitHub Data Synchronization"
 log "Cloning repository (Branch: main)..."
@@ -368,6 +374,7 @@ case $main_choice in
     2) FOLDERS_TO_COPY=(update-motd) ;;
     3) FOLDERS_TO_COPY=(vpn-proxy update-motd) ;;
     4) FOLDERS_TO_COPY=(nfs-mergerfs update-motd) ;;
+    5) FOLDERS_TO_COPY=(update-motd) ;;
 esac
 
 for folder in "${FOLDERS_TO_COPY[@]}"; do
@@ -473,12 +480,14 @@ INSTALL_SECS=$((INSTALL_TOTAL % 60))
 
 # --- 9. Final Status Report ---
 section_title "Installation Final Report"
-[ "$SUDO_USER" ] && usermod -aG docker "$SUDO_USER"
+[[ "$main_choice" != "5" ]] && [ "$SUDO_USER" ] && usermod -aG docker "$SUDO_USER"
 apt-get autoremove -yqq >> "$LOG_FILE" 2>&1
 
 echo -e "\n${BLUE}[SYSTEM VERSIONS]${NC}"
-echo -e "  - Docker:         $(docker --version)"
-echo -e "  - Compose:        $(docker compose version 2>/dev/null || docker-compose version --short 2>/dev/null || echo 'n/a')"
+if [[ "$main_choice" != "5" ]]; then
+    echo -e "  - Docker:         $(docker --version)"
+    echo -e "  - Compose:        $(docker compose version 2>/dev/null || docker-compose version --short 2>/dev/null || echo 'n/a')"
+fi
 echo -e "  - Python:         $(python3 --version)"
 echo -e "  - Python-pip:     $(pip3 --version 2>/dev/null || echo 'not found')"
 echo -e "  - Git:            $(git --version)"
@@ -492,8 +501,10 @@ echo -e "  - Lolcat:         $(command -v lolcat >/dev/null 2>&1 && echo -e "${G
 echo -e "\n${BLUE}[SECURITY & SERVICES]${NC}"
 echo -e "  - fail2ban status: $(systemctl is-active --quiet fail2ban 2>/dev/null && echo -e "${GREEN}RUNNING${NC}" || echo -e "${RED}STOPPED${NC}")"
 echo -e "  - fail2ban enabled: $(systemctl is-enabled --quiet fail2ban 2>/dev/null && echo -e "${GREEN}YES${NC}" || echo -e "${YELLOW}NO${NC}")"
-echo -e "  - Docker status:  $(systemctl is-active --quiet docker 2>/dev/null && echo -e "${GREEN}RUNNING${NC}" || echo -e "${RED}STOPPED${NC}")"
-echo -e "  - Local-Persist:  $(systemctl is-active --quiet docker-volume-local-persist 2>/dev/null && echo -e "${GREEN}ACTIVE${NC}" || echo -e "${RED}INACTIVE${NC}")"
+if [[ "$main_choice" != "5" ]]; then
+    echo -e "  - Docker status:  $(systemctl is-active --quiet docker 2>/dev/null && echo -e "${GREEN}RUNNING${NC}" || echo -e "${RED}STOPPED${NC}")"
+    echo -e "  - Local-Persist:  $(systemctl is-active --quiet docker-volume-local-persist 2>/dev/null && echo -e "${GREEN}ACTIVE${NC}" || echo -e "${RED}INACTIVE${NC}")"
+fi
 
 echo -e "\n${BLUE}[PACKAGES INSTALLED]${NC}"
 if [ ${#INSTALLED_PACKAGES[@]} -gt 0 ]; then
@@ -504,15 +515,17 @@ else
     echo "  ${YELLOW}(No new packages installed)${NC}"
 fi
 
-echo -e "\n${BLUE}[NETWORK STATUS]${NC}"
-docker network ls --filter "name=proxy" --format "  Network: {{.Name}} ({{.Driver}})"
+if [[ "$main_choice" != "5" ]]; then
+    echo -e "\n${BLUE}[NETWORK STATUS]${NC}"
+    docker network ls --filter "name=proxy" --format "  Network: {{.Name}} ({{.Driver}})"
 
-echo -e "\n${BLUE}[CONTAINER STATUS]${NC}"
-container_count=$(docker ps --quiet | wc -l)
-if [ $container_count -gt 0 ]; then
-    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-else
-    echo -e "  ${YELLOW}No containers running${NC}"
+    echo -e "\n${BLUE}[CONTAINER STATUS]${NC}"
+    container_count=$(docker ps --quiet | wc -l)
+    if [ $container_count -gt 0 ]; then
+        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    else
+        echo -e "  ${YELLOW}No containers running${NC}"
+    fi
 fi
 
 echo -e "\n${BLUE}[INSTALLATION SUMMARY]${NC}"
@@ -523,7 +536,7 @@ echo -e "  - Log file:       $LOG_FILE"
 echo -e "\n${CYAN}====================================================${NC}"
 echo -e "${GREEN}SUCCESS! Your system is ready to use.${NC}"
 echo -e "Check logs at: ${YELLOW}$LOG_FILE${NC}"
-if [ "$SUDO_USER" ]; then
+if [ "$SUDO_USER" ] && [[ "$main_choice" != "5" ]]; then
     echo -e "${RED}IMPORTANT:${NC} Please logout and login again for Docker group permissions!"
 fi
 echo -e "${CYAN}====================================================${NC}"
