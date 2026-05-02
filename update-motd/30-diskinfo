@@ -13,14 +13,14 @@ blue="\e[1;34m"
 dim="\e[2m"
 undim="\e[0m"
 
-# disk usage: ignore zfs, squashfs & tmpfs
+# disk usage: ignore pseudo/fs mounts and transient paths
 mapfile -t dfs < <(df -H -x fuse.rclone -x fuse.unionfs -x fuse.mergerfs -x overlay -x proc -x sys -x dev -x squashfs -x tmpfs -x devtmpfs --output=target,pcent,size,avail,used | tail -n+2 | sort)
 printf "\n  ${blue}Storage${undim}\n"
 
 for line in "${dfs[@]}"; do
 
-    # skip docker paths
-    if [[ $line =~ .*docker.* ]]; then
+    # skip docker paths and pseudo mounts that are not useful in MOTD
+    if [[ $line =~ .*docker.* ]] || [[ $line =~ ^/run($|/) ]] || [[ $line =~ ^/sys($|/) ]] || [[ $line =~ ^/snap($|/) ]] || [[ $line =~ ^/var/lib/snapd($|/) ]]; then
         continue
     fi
 

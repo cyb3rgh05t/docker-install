@@ -34,8 +34,12 @@ baseavi=$(df -h / | awk '{ a = $4 } END { print a }')
 basepercent=$(df -h | awk '{if($(NF) == "/") {print $(NF-1); exit;}}')
 
 ##security part
-failledssh=$(cat /var/log/auth.log | grep -i "fail" | wc -l)
-failledsshacc=$(head -n1 /var/log/auth.log | awk '{print $1, $2 ,$3 }')
+failledssh=$(grep -i "fail" /var/log/auth.log 2>/dev/null | wc -l)
+if [ -f /var/log/auth.log ]; then
+    failledsshacc=$(stat -c "%y" /var/log/auth.log 2>/dev/null | cut -d'.' -f1)
+else
+    failledsshacc="n/a"
+fi
 
 W="\e[0;39m"
 G="\e[1;32m"
